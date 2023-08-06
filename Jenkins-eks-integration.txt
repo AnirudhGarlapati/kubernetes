@@ -1,0 +1,91 @@
+Agenda: Development teams should be able to run kubectl commands on AWS EKS cluster (hosted in AWS account A) from Jenkins (hosted in AWS account B) 
+
+Jenkins:
+Ec2 instance should have instance profile which has permissions to describe, list and get token from EKS clusters. Take a note of the instance profile arn.
+Install kubectl
+Get EKS cluster certificate by using below command (run this from one of the ec2 servers hosted in Account A only): 
+
+aws eks describe-cluster — region $region_code — name $cluster_name — query “cluster.certificateAuthority.data” — output text
+Create kube-config file under .kube/config in Jenkins host and export below values.
+export region_code=region-code
+export cluster_name=my-cluster
+export account_id=111122223333
+certificate_data=<output from above command>
+cluster_endpoint=<target eks cluster endpoint>
+
+Run below bash script which should create required kube config.
+#!/bin/bash
+read -r -d ‘’ KUBECONFIG <<EOF
+apiVersion: v1
+clusters:
+- cluster:
+ certificate-authority-data: $certificate_data
+ server: $cluster_endpoint
+ name: arn:aws:eks:$region_code:$account_id:cluster/$cluster_name
+contexts:
+- context:
+ cluster: arn:aws:eks:$region_code:$account_id:cluster/$cluster_name
+ user: arn:aws:eks:$region_code:$account_id:cluster/$cluster_name
+ name: arn:aws:eks:$region_code:$account_id:cluster/$cluster_name
+current-context: arn:aws:eks:$region_code:$account_id:cluster/$cluster_name
+kind: Config
+preferences: {}
+users:
+- name: arn:aws:eks:$region_code:$account_id:cluster/$cluster_name
+ user:
+ exec:
+ apiVersion: client.authentication.k8s.io/v1beta1
+ command: aws
+ args:
+ — — region
+ — $region_code
+ — eks
+ — get-token
+ — — cluster-name
+ — $cluster_name
+EOF
+echo “${KUBECONFIG}” > ~/.kube/config
+
+Add the file path to your KUBECONFIG environment variable
+export KUBECONFIG=$KUBECONFIG:~/.kube/config for Linux and Mac
+$ENV:KUBECONFIG=”{0};{1}” -f $ENV:KUBECONFIG “$ENV:userprofile\.kube\config” for windows
+
+
+
+EKS:
+Create Cluster Role and Cluster RoleBinding in EKS and modify aws-auth config map to create group and user.
+
+Create cluster role and binding as follows:
+— -
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+ name: jenkins-clusterrole
+rules:
+- apiGroups: [“*”]
+ resources: [“deployments”, “configmaps”, “pods”, “secrets”, “services”]
+ verbs: [“get”, “list”, “watch”, ”delete”]
+ — -
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+ name: jenkins-clusterrole-binding
+subjects:
+- kind: Group
+ name: jenkins-group
+ apiGroup: rbac.authorization.k8s.io
+roleRef:
+ kind: ClusterRole
+ name: jenkins-clusterrole
+ apiGroup: rbac.authorization.k8s.io
+
+edit aws-auth config map as follows(if config-map already has some config just add below config lines under mapRoles section as additional config to config-map. Dont delete existing config or overrite with below config entirely ):
+apiVersion: v1
+data:
+mapRoles: |
+ - groups:
+ - jenkins-group
+   rolearn: <Jenkins instance role arn>
+   username: jenkins
+
+Apply above file to eks cluster.
