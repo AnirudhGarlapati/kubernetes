@@ -1,0 +1,562 @@
+Kubernetes commands
+
+Linux:
+crtl+r for recursive history search
+grep -i value
+wc -l
+kubectl explain pods --recursive | grep valueFrom -A3
+
+
+Namespace:
+
+kubectl get ns
+kubectl get ns --no-headers | wc -l
+kubectl config current-context
+kubectl config get-contexts
+kubectl config set-context
+kubectl create ns ns_name
+kubectl config set-context $(kubectl config current-context) --namespace sample
+kubectl create quota my-quota
+--hard=cpu=1,memory=1G,pods=2,services=3,replicationcontrollers=2,resourcequotas=1,secrets=5,persistentvolumeclaims=10
+-------------------------------------------------------
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: compute-quota
+  namespace: sample
+spec:
+  hard:
+    pods: "10"
+    requests.cpu: "4"
+    requests.memory: 5Gi
+    limits.cpu: "10"
+    limits.memory: 10Gi  
+-------------------------------------------------------
+
+POD:
+
+kubectl get all
+kubectl get pods --all-namespaces
+kubectl get pods -o wide
+kubectl get pods --watch
+kubectl get pods -o wide -w / watch pods being created
+kubectl run nginx --image=nginx --restart=Never -n namespace
+kubectl run nginx --image=nginx --restart=Never --labels=app=front-end
+kubectl run nginx --image=nginx --restart=Never --port=80 -n namespace
+kubectl run nginx --image=nginx --restart=Never --port=80 --env="a=b" -n namespace
+kubectl run nginx --image=nginx -n namespace --dry-run=client -o yaml > pod.yaml
+kubectl exec pod_name -it -- sh -c 'echo $(whoami)'
+kubectl edit pod podname 
+kubectl describe pod podname 
+kubectl delete pod podname
+kubectl exec -it podname --sh / kubectl exec -it podname /bin/sh
+kubectl logs podname 
+kubectl logs podname -p / for previous instance logs 
+kubectl logs podname -c containername / for excat container logs
+kubectl logs podname -f / for continous logging with out terminal exit
+
+ReplicaSet:
+
+Note: There is no cmd to create replicaSet so we need to create using yml from scratch using apiVerion as apps/v1
+
+replicaSet.yaml
+-----------------------------------------------------------------
+apiVersion: apps/v1
+kind: ReplicaSet
+metadata:
+  name: frontend
+  labels:
+    app: guestbook
+    tier: frontend
+spec:
+  # modify replicas according to your case
+  replicas: 3
+  selector:
+    matchLabels:
+      tier: frontend
+  template:
+    metadata:
+      labels:
+        tier: frontend
+    spec:
+      containers:
+      - name: php-redis
+        image: gcr.io/google_samples/gb-frontend:v3
+-----------------------------------------------------------------        
+
+kubectl get rs
+kubectl describe rs rs_name
+kubectl edit rs rs_name
+kubectl delete rs rs_name
+kubectl scale rs rs_name --replicas=3
+
+Deployments:
+
+replace replicaSet yaml kind to deployment 
+
+kubectl create deployment deployment_name --image=httpd --replicas=4
+kubectl scale deployment deployment_name --replicas=3
+kubectl apply -f deployment.yaml
+
+DNS:
+
+serviceName.Namespace.svc.cluster.local
+if service is in same ns we can just use service name to connect
+
+Service:
+
+kubectl expose pod pod_name --name svc_name --port 80 --target-port 80
+kubectl expose deploy mydepl --name myservice --port 80 --target-port=80
+kubectl expose pod nginx --port=80 --name nginx-service --type=NodePort --dry-run=client -o yaml
+kubectl run httpd --image=httpd --port 80 --expose --dry-run=client -o yaml / this will create pod defination along with service defination file of type clusterIP with port and target ports set to 80
+kubectl describe svc svc_name
+kubectl get svc
+
+Kubernetes CMD and ARGS
+
+ENV Variables:
+
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    run: nginx
+  name: nginx
+spec:
+  containers:
+  - image: nginx
+    name: nginx
+    ports:
+      - containerPort: 80
+    env:
+      - name: env_name
+        vaule: env_vaule
+
+Config Maps:
+
+kubectl create configmap app-config \
+            --from-literal=APP_COLOR=blue \
+            --from-literal=APP_MOD=prod
+
+kubectl -n sample create configmap app-config \
+            --from-literal=APP_COLOR=blue \
+            --from-literal=APP_MOD=prod --dry-run=client -o yaml > cm.yaml
+
+
+kubectl create configmap app-config --from-file=app_config.properties
+
+kubectl get cm
+kubetcl describe cm cm-name
+
+in pod:
+
+envFrom:
+  - configMapRef:
+      name: cm_name
+
+single env:
+
+env:
+  - name: APP_COLOR
+    valueFrom:
+      configMapKeyRef:
+        name: app-config
+        key: APP_COLOR
+
+ inject via volumes:
+
+ volumes:
+  - name: app-config-volume
+    configMap:
+      name: app_config  
+
+ volumes:
+  - name: app-config-volume
+    configMap:
+      name: app_config 
+      items:
+       - key: APP_COLOR
+         path: app-color.txt          
+
+Secrets:
+
+kubectl create secret generic secret_name --from-literal=DB_HOST=mydb
+kubetcl create secret generic secret_name --from-file=app.properties
+kubectl get secret
+kubect describe secret secret_name
+kubectl get secret secret_name -o yaml -> to view secrets
+
+echo -n 'text' | base64
+echo -n 'text' | base64 --decode
+
+in pod:
+
+envFrom:
+  - secretRef:
+      name: sec_name
+
+single env:
+
+env:
+  - name: APP_COLOR
+    valueFrom:
+      secretKeyRef:
+        name: app-config
+        key: APP_COLOR
+
+ inject via volumes:
+
+ volumes:
+  - name: app-sec-volume
+    secret:
+      name: app_config  
+
+ volumes:
+  - name: app-sec-volume
+    secret:
+      name: app_sec
+      items:
+       - key: APP_COLOR
+         path: app-color.txt
+
+Linux Namespaces and Capabilities 
+
+--cap-add
+--cap-drop
+--previlaged for all permissions
+
+Security Context:
+
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    run: nginx
+  name: nginx
+spec:
+  securityContext:
+    runAsUser: 1000
+    capabilities:
+      add: ["MAC_ADMIN"]
+  containers:
+  - image: nginx
+    name: nginx
+    ports:
+      - containerPort: 80
+
+ At Container Level:
+
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    run: nginx
+  name: nginx
+spec:
+  containers:
+  - image: nginx
+    name: nginx
+    ports:
+      - containerPort: 80
+    securityContext:
+      runAsUser: 1000
+      capabilities:
+        add: ["MAC_ADMIN"]  
+
+Service Account:
+
+kubectl create sa sa_name 
+kubectl get sa 
+kubectl describe sa sa_name
+
+automountServiceAccountToken: false
+
+Resources:
+
+resources:
+ requests:
+   memory: "1Gi"
+   cpu: 1
+ limits:
+   memory: "2Gi"
+   cpu: 1.5
+
+When a pod is created the containers are assigned a default CPU request of .5 and memory of 256Mi". For the POD to pick up those defaults you must have first set those as default values for request and limit by creating a LimitRange in that namespace.
+
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: mem-limit-range
+spec:
+  limits:
+  - default:
+      memory: 512Mi
+    defaultRequest:
+      memory: 256Mi
+    type: Container
+
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: cpu-limit-range
+spec:
+  limits:
+  - default:
+      cpu: 1
+    defaultRequest:
+      cpu: 0.5
+    type: Container    
+
+kubetcl describe pod pod_name: it has reason why container exited
+
+Taint and Tolerance:
+
+Taint: node
+Tolerance: pod
+
+kubectl taint nodes node-name key=vaule:taint-effect
+ex: kubectl taint nodes docker-desktop app=blue:NoSchedule
+
+taint-effect has 3 modes NoSchedule | PreferNoSchedule | NoExecute
+
+default master/controlplane taint is node-role.kubernetes.io/master:NoSchedule
+
+To remove taint: kubectl taint nodes controlplane node-role.kubernetes.io/master:NoSchedule-
+kubectl taint node node01 spray=mortein:NoSchedule-
+
+in pod: 
+
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    run: nginx
+  name: nginx
+spec:
+  containers:
+  - image: nginx
+    name: nginx
+  tolerations:
+  - key: "app"
+    operator: "Equal"
+    value: "blue"
+    effect: "NoSchedule"  
+
+Node Selectors: for different worker nodes sizes   
+
+ kubectl label nodes node01 size=large
+ kubectl label nodes node01 size=medium
+
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    run: nginx
+  name: nginx
+spec:
+  containers:
+  - image: nginx
+    name: nginx
+  nodeSelector:
+    size: large  
+
+Node Affinty: for advance expressions
+
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    run: nginx
+  name: nginx
+spec:
+  containers:
+  - image: nginx
+    name: nginx
+  affinty:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+        - matchExpressions:
+          - key: size
+            operator: In / NotIn / Exists (only if key exists)
+            values:
+            - large
+            - small
+
+
+requiredDuringSchedulingIgnoredDuringExecution
+preferedDuringSchedulingIgnoredDuringExecution
+requiredDuringSchedulingRequiredDuringExecution
+
+Multi Container Pods:
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: myapp-pod
+  labels:
+    app: myapp
+spec:
+  containers:
+  - name: myapp-container
+    image: busybox:1.28
+    command: ['sh', '-c', 'echo The app is running! && sleep 3600']
+  - name: myservice
+    image: splunk
+
+Init Container:
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: myapp-pod
+  labels:
+    app: myapp
+spec:
+  containers:
+  - name: myapp-container
+    image: busybox:1.28
+    command: ['sh', '-c', 'echo The app is running! && sleep 3600']
+  initContainers:
+  - name: init-myservice
+    image: busybox
+    command: 
+      - "sleep"
+      - "20"
+
+Readiness Probe:
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: myapp-pod
+  labels:
+    app: myapp
+spec:
+  containers:
+  - name: myapp-container
+    image: busybox:1.28
+    command: ['sh', '-c', 'echo The app is running! && sleep 3600']
+    readniessProbe:
+      httpGet:
+       path: /api/ready
+       port: 8080   
+       initialDelaySeconds: 10
+       periodSeconds: 5
+       failureThreshold: 8
+      tcpSocket:
+        port: 3306
+      exec:
+        command:
+          - sh
+          - /app/ready.sh
+
+Liveness Probe:
+
+is Application running without issues
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: myapp-pod
+  labels:
+    app: myapp
+spec:
+  containers:
+  - name: myapp-container
+    image: busybox:1.28
+    command: ['sh', '-c', 'echo The app is running! && sleep 3600']
+    livenessProbe:
+      httpGet:
+       path: /api/ready
+       port: 8080   
+       initialDelaySeconds: 10
+       periodSeconds: 5
+       failureThreshold: 8
+      tcpSocket:
+        port: 3306
+      exec:
+        command:
+          - sh
+          - /app/ready.sh
+
+
+Rolling updates and Rollback Deployments
+
+kubectl rollout status deployment/my-deployment
+kubectl rollout history deployment nginx
+kubectl set image deployment nginx nginx=nginx:1.17 --record
+
+kubectl rollout undo deployment/my-deployment
+
+Jobs:
+
+kubectl create job my-job --image=busybox
+
+apiVerion: batch/v1
+kind: Job
+metadata:
+  name: something
+spec:
+  completions: 3
+  parallelism: 3
+  template:
+    spec:
+      containers:
+        - name: random-error
+          image: ramdom
+        restartPolicy: Never
+
+Cron Job:
+
+  kubectl create cronjob my-job --image=busybox --schedule="*/1 * * * *"
+  
+apiVerion: batch/v1beta1
+kind: CronJob
+metadata:
+  name: something
+spec:
+  schedule: "*/1 * * * *"
+  jobTemplate:
+    spec:
+      completions: 3
+      parallelism: 3
+      template:
+        spec:
+          containers:
+            - name: random-error
+              image: ramdom
+          restartPolicy: Never       
+
+ Node Port:
+
+ kubectl expose deployment deployment_name -n namespace --name name --port=80 --target-port=80 --type NodePort
+ 
+ Ingress:
+
+annotations:
+  nginx.ingress.kubernetes.io/rewrite-target: /
+  nginx.ingress.kubernetes.io/ssl-redirect: "false"
+ kubectl create ingress ingress_name -n namespace --rule="/pay=pay-service:8282"
+ kubectl create ingress -h        
+
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: test-ingress
+  namespace: critical-space
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  rules:
+  - http:
+      paths:
+      - path: /pay
+        backend:
+          serviceName: pay-service
+          servicePort: 8282
+  
+
+kubectl top node
+kubectl top pods  
+
